@@ -9,6 +9,7 @@ variable "ami_id" {
   type        = string
   default     = "ami-0c55b159cbfafe1f0"
 }
+
 variable "instance_type" {
   description = "The type of EC2 instance to create"
   type        = string
@@ -20,23 +21,19 @@ variable "key_name" {
   type        = string
   default     = ""
 }
-variable "vpc_cidr" {
-  description = "The CIDR block for the VPC"
-  type        = string
-  default     = ""
-}
 
-variable "public_subnet_01_cidr" {
-  description = "The CIDR block for the first subnet"
-  type        = string
-  default     = ""
-}
+variable "availability_zones" {
+  description = "The availability zone for the resources"
+  type        = list(string)
+  default     = ["us-west-2a", "us-west-2b"]
 
+}
 variable "aws_access" {
   description = "The AWS access key"
   type        = string
   default     = ""
 }
+
 variable "aws_secret" {
   description = "The AWS secret key"
   type        = string
@@ -56,16 +53,34 @@ variable "my_ip" {
 
 }
 
-variable "availability_zone_a" {
-  description = "The availability zone for the resources"
+variable "vpc_cidr" {
+  description = "The CIDR block for the VPC"
   type        = string
-  default     = "us-west-2a"
+  default     = ""
+}
 
+variable "public_subnet_cidrs" {
+  description = "The CIDR block for the first subnet"
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+}
+
+variable "private_subnet_cidrs" {
+  description = "The CIDR blocks for the private subnets"
+  type        = list(string)
+  default     = ["10.0.3.0/24", "10.0.4.0/24"]
 }
 
 variable "open_cidr" {
   description = "The CIDR block to allow open access"
   type        = string
   default     = "0.0.0.0/0"
+
+}
+
+variable "user_name" {
+  description = "The username for SSH access to the EC2 instance"
+  type        = string
+  default     = ""
 
 }
