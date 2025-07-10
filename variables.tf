@@ -4,12 +4,6 @@ variable "aws_region" {
   default     = "us-west-2"
 }
 
-variable "ami_id" {
-  description = "The AMI ID to use for the EC2 instance"
-  type        = string
-  default     = "ami-0c55b159cbfafe1f0"
-}
-
 variable "instance_type" {
   description = "The type of EC2 instance to create"
   type        = string
@@ -62,17 +56,17 @@ variable "vpc_cidr" {
 variable "public_subnet_cidrs" {
   description = "The CIDR block for the first subnet"
   type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+  default     = []
 }
 
 variable "private_subnet_cidrs" {
   description = "The CIDR blocks for the private subnets"
   type        = list(string)
-  default     = ["10.0.3.0/24", "10.0.4.0/24"]
+  default     = []
 }
 
-variable "open_cidr" {
-  description = "The CIDR block to allow open access"
+variable "anywhere_ipv4" {
+  description = "The CIDR block to allow access from anywhere"
   type        = string
   default     = "0.0.0.0/0"
 

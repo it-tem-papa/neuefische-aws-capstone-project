@@ -9,7 +9,9 @@ This project creates a secure, highly available WordPress hosting environment on
 - **Custom VPC** with public and private subnets across multiple AZs
 - **Web Server** (EC2) in public subnet for management access
 - **Application Servers** (Auto Scaling Group) in private subnets running WordPress
-- **Application Load Balancer** distributing traffic across app servers
+- **Application Load Balancer** with health checks distributing traffic across app servers
+- **Auto Scaling Policies** with CPU-based scaling triggers
+- **CloudWatch Monitoring** with automatic scaling alarms
 - **NAT Gateway** for private subnet internet access
 - **Security Groups** with layered security controls
 - **Automated WordPress installation** via user data scripts
@@ -26,7 +28,7 @@ This project creates a secure, highly available WordPress hosting environment on
 └─────────────────────────────────────┬───────────────────────────────────────────────┘
                                       │
 ┌─────────────────────────────────────┴───────────────────────────────────────────────┐
-│                    VPC (10.0.0.0/16) - us-west-2                                    │
+│                    VPC (10.0.0.0/26) - us-west-2                                    │
 │                                                                                     │
 │  ┌─────────────────────────────┐    ┌─────────────────────────────────────────────┐ │
 │  │     AVAILABILITY ZONE A     │    │        AVAILABILITY ZONE B                  │ │
@@ -34,7 +36,7 @@ This project creates a secure, highly available WordPress hosting environment on
 │  │                             │    │                                             │ │
 │  │ ┌─────────────────────────┐ │    │ ┌──────────────────────────────────────┐    │ │
 │  │ │   PUBLIC SUBNET 1       │ │    │ │        PUBLIC SUBNET 2               │    │ │
-│  │ │    (10.0.1.0/24)        │ │    │ │         (10.0.2.0/24)                │    │ │
+│  │ │    (10.0.0.0/28)        │ │    │ │         (10.0.0.16/28)               │    │ │
 │  │ │                         │ │    │ │                                      │    │ │
 │  │ │  ┌─────────────────┐    │ │    │ │                                      │    │ │
 │  │ │  │   WEB SERVER    │    │ │    │ │                                      │    │ │
@@ -50,12 +52,12 @@ This project creates a secure, highly available WordPress hosting environment on
 │  │                             │    │                                             │ │
 │  │ ┌───────────────────────────────────────────────────────────────────────────┐  │ │
 │  │ │                    APPLICATION LOAD BALANCER (ALB)                        │  │ │
-│  │ │                   (Spans both public subnets)                             │  │ │
+│  │ │                      (Spans both public subnets)                          │  │ │
 │  │ └───────────────────────────────────────────────────────────────────────────┘  │ │
 │  │                             │    │                                             │ │
 │  │ ┌─────────────────────────┐ │    │ ┌──────────────────────────────────────┐    │ │
 │  │ │   PRIVATE SUBNET 1      │ │    │ │       PRIVATE SUBNET 2               │    │ │
-│  │ │    (10.0.3.0/24)        │ │    │ │        (10.0.4.0/24)                 │    │ │
+│  │ │    (10.0.0.32/28)       │ │    │ │        (10.0.0.48/28)                │    │ │
 │  │ │                         │ │    │ │                                      │    │ │
 │  │ │  ┌─────────────────┐    │ │    │ │  ┌─────────────────────────────────┐ │    │ │
 │  │ │  │   APP SERVER    │    │ │    │ │  │         APP SERVER              │ │    │ │
@@ -72,7 +74,7 @@ This project creates a secure, highly available WordPress hosting environment on
 │                                    │                                                │
 │                        ┌───────────┴──────────┐                                     │
 │                        │   AUTO SCALING GROUP │                                     │
-│                        │    (Min: 1, Max: 3)  │                                     │
+│                        │    (Min: 1, Max: 4)  │                                     │
 │                        └──────────────────────┘                                     │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
@@ -92,29 +94,42 @@ SECURITY GROUPS:
 ## Infrastructure Components
 
 ### Networking
-- **VPC**: Custom Virtual Private Cloud (configurable CIDR)
-- **Public Subnets**: 2 subnets across different AZs (default: 10.0.1.0/24, 10.0.2.0/24)
-- **Private Subnets**: 2 subnets across different AZs (default: 10.0.3.0/24, 10.0.4.0/24)
+- **VPC**: Custom Virtual Private Cloud (10.0.0.0/26)
+- **Public Subnets**: 2 subnets across different AZs (10.0.0.0/28, 10.0.0.16/28)
+- **Private Subnets**: 2 subnets across different AZs (10.0.0.32/28, 10.0.0.48/28)
 - **Internet Gateway**: Provides internet access for public subnets
 - **NAT Gateway**: Enables private subnet internet access
 - **Route Tables**: Separate routing for public and private subnets
 
 ### Security
-- **Web Server Security Group**:
-  - SSH (port 22): Restricted to your IP
+- **Web Server Security Group** (`sg_web_server`):
+  - SSH (port 22): Restricted to your IP only
+  - HTTP (port 80): Open to internet (for management/testing)
+  - Outbound: All traffic allowed
+- **Application Load Balancer Security Group** (`sg_alb`):
   - HTTP (port 80): Open to internet
-- **Application Load Balancer Security Group**:
-  - HTTP (port 80): Open to internet
-- **App Server Security Group**:
-  - HTTP (port 80): From ALB only
-  - SSH (port 22): From web server only
+  - Outbound: HTTP (port 80) to app servers only
+- **App Server Security Group** (`sg_app_server`):
+  - HTTP (port 80): From ALB security group only
+  - SSH (port 22): From web server security group only
+  - Outbound: All traffic allowed (for updates via NAT Gateway)
 
 ### Compute
-- **Web Server**: Single EC2 instance in public subnet for management
-- **App Servers**: Auto Scaling Group (1-3 instances) in private subnets
-- **Load Balancer**: Application Load Balancer distributing traffic
-- **Launch Template**: Standardized configuration for app servers
+- **AMI Selection**: Automatically uses the latest Amazon Linux 2 AMI via data source
+- **Web Server**: Single EC2 instance in public subnet (bastion host for management)
+- **App Servers**: Auto Scaling Group (1-4 instances) in private subnets
+- **Load Balancer**: Application Load Balancer with health checks distributing traffic
+- **Launch Template**: Standardized configuration with SSH key and proper instance tagging
+- **Auto Scaling Policies**: CPU-based scaling (scale up >70%, scale down <30%)
+- **Target Group**: Automatic registration/deregistration via ASG attachment
 - **Auto-configured** with Apache, PHP 8.0, MariaDB, and WordPress
+
+### Monitoring & Auto Scaling
+- **Health Checks**: ALB monitors app server health every 30 seconds
+- **CloudWatch Alarms**: CPU utilization monitoring with 2-minute evaluation periods
+- **Scaling Policies**: Automatic instance addition/removal based on CPU load
+- **ELB Health Checks**: Auto Scaling Group uses load balancer health status
+- **Cooldown Periods**: 5-minute cooldown between scaling actions
 
 ## Prerequisites
 
@@ -134,12 +149,11 @@ SECURITY GROUPS:
    Update `terraform.tfvars` with your specific values:
    ```hcl
    aws_region             = "us-west-2"
-   ami_id                 = "ami-040361ed8686a66a2"  # Amazon Linux 2
    instance_type          = "t2.micro"
    key_name               = "your-key-pair-name"
-   vpc_cidr               = "10.0.0.0/16"
-   public_subnet_cidrs    = ["10.0.1.0/24", "10.0.2.0/24"]
-   private_subnet_cidrs   = ["10.0.3.0/24", "10.0.4.0/24"]
+   vpc_cidr               = "10.0.0.0/26"
+   public_subnet_cidrs    = ["10.0.0.0/28", "10.0.0.16/28"]
+   private_subnet_cidrs   = ["10.0.0.32/28", "10.0.0.48/28"]
    availability_zones     = ["us-west-2a", "us-west-2b"]
    my_ip                  = "YOUR.IP.ADDRESS/32"
    aws_access             = "your-access-key"
@@ -184,6 +198,35 @@ The web server user data script:
 - **User**: wpuser
 - **Password**: wppassword (change in production!)
 
+### Auto Scaling Configuration
+
+#### Health Checks
+- **Target Group Health Check**: 
+  - Path: `/` (WordPress homepage)
+  - Interval: 30 seconds
+  - Timeout: 5 seconds
+  - Healthy threshold: 2 consecutive successful checks
+  - Unhealthy threshold: 2 consecutive failed checks
+
+#### Scaling Policies
+- **Scale Up Policy**:
+  - Trigger: CPU utilization > 70%
+  - Evaluation: 2 periods of 2 minutes (4 minutes total)
+  - Action: Add 1 instance
+  - Cooldown: 5 minutes
+
+- **Scale Down Policy**:
+  - Trigger: CPU utilization < 30%
+  - Evaluation: 2 periods of 2 minutes (4 minutes total)
+  - Action: Remove 1 instance
+  - Cooldown: 5 minutes
+
+#### Load Balancer Features
+- **Cross-Zone Load Balancing**: Enabled by default
+- **Health Check Integration**: ASG uses ELB health checks
+- **Automatic Target Registration**: New instances automatically join target group
+- **Graceful Termination**: Unhealthy instances are drained before termination
+
 ### Security Considerations
 
 ⚠️ **Important Security Notes**:
@@ -197,30 +240,56 @@ The web server user data script:
 
 ```
 .
-├── main.tf              # Terraform configuration and provider requirements
-├── provider.tf          # AWS provider configuration
-├── variables.tf         # Variable definitions
-├── vpc.tf              # VPC, subnets, security groups, NAT gateway, and networking
-├── ec2.tf              # EC2 instances, Auto Scaling Group, and Load Balancer
-├── terraform.tfvars    # Variable values (keep secure!)
+├── main.tf                    # Terraform configuration and provider requirements
+├── provider.tf                # AWS provider configuration
+├── variables.tf               # Variable definitions
+├── vpc.tf                     # VPC configuration
+├── routetable.tf              # Route tables and associations
+├── nat.tf                     # NAT Gateway and Elastic IP
+├── sg.tf                      # Security groups (web server, ALB, app servers)
+├── ec2.tf                     # Web server EC2 instance with AMI data source
+├── alb.tf                     # Application Load Balancer and target group
+├── autoscaling.tf             # Launch template, ASG, scaling policies, CloudWatch alarms
+├── terraform.tfvars           # Variable values (keep secure!)
 ├── scripts/
-│   ├── userdata_web.sh # Web server initialization script
-│   └── userdata_app.sh # App server initialization script
-└── README.md           # This file
+│   ├── userdata_web.sh        # Web server initialization script
+│   ├── userdata_app.sh        # App server initialization script
+│   └── loadbalancertest.sh    # Load balancer testing script
+├── forme.md                   # Detailed architecture explanation
+└── README.md                  # This file
 ```
 
 ## Customization
 
 ### Scaling Options
-- Modify Auto Scaling Group settings (min_size, max_size, desired_capacity)
-- Change `instance_type` in variables for more powerful instances
-- Add additional availability zones and subnets
-- Configure Auto Scaling policies based on metrics
+- **Auto Scaling Group**: Currently configured for 1-4 instances with CPU-based scaling
+- **Scaling Triggers**: 
+  - Scale up when CPU > 70% for 4 minutes
+  - Scale down when CPU < 30% for 4 minutes
+- **Modify thresholds**: Adjust CPU thresholds in CloudWatch alarms
+- **Instance types**: Change `instance_type` in variables for more powerful instances
+- **Capacity**: Modify min_size, max_size, desired_capacity in ASG
+- **Additional metrics**: Add memory, network, or custom application metrics
+- **Multi-AZ**: Already spans multiple availability zones for high availability
 
 ### Security Enhancements
 - Use AWS Systems Manager Session Manager instead of SSH
 - Implement AWS WAF for web application protection
 - Add CloudWatch monitoring and logging
+
+### Infrastructure Organization
+The project uses a **modular file structure** for better maintainability:
+- **Networking**: `vpc.tf`, `routetable.tf`, `nat.tf` - Network infrastructure
+- **Security**: `sg.tf` - All security groups with proper references
+- **Compute**: `ec2.tf`, `autoscaling.tf` - Web server and app server configurations
+- **Load Balancing**: `alb.tf` - Load balancer, target group, and listener
+- **Configuration**: `variables.tf`, `terraform.tfvars` - Variable definitions and values
+
+This modular approach makes it easier to:
+- **Understand** the infrastructure components
+- **Modify** specific parts without affecting others
+- **Debug** issues in isolated components
+- **Scale** the infrastructure by adding new modules
 
 ## Cleanup
 
@@ -233,22 +302,53 @@ terraform destroy
 
 ### Common Issues
 1. **SSH Access Denied**: Verify your IP address in `my_ip` variable
-2. **WordPress Not Loading**: Check security group rules and EC2 status
-3. **Database Connection Error**: Verify MariaDB service is running
+2. **WordPress Not Loading**: Check ALB health checks and target group status
+3. **Database Connection Error**: Verify MariaDB service is running on app servers
+4. **Auto Scaling Not Working**: Check CloudWatch alarms and scaling policies
+5. **Health Check Failures**: Verify WordPress is responding on port 80
+6. **Instances Not Joining ALB**: Check target group registration and health status
+7. **ALB Health Check Failures**: Verify ALB security group allows outbound HTTP to app servers
+8. **Security Group Rule Deletion Error**: If you get GroupId missing errors during destroy:
+   ```bash
+   # Remove orphaned security group rules from state
+   terraform state list | grep aws_vpc_security_group_.*_rule
+   terraform state rm <rule_resource_name>
+   # Then run destroy again
+   terraform destroy
+   ```
 
 ### Useful Commands
 ```bash
 # Check Terraform state
 terraform show
 
-# SSH into EC2 instance
-ssh -i your-key.pem ec2-user@YOUR-EC2-PUBLIC-IP
+# Validate configuration
+terraform validate
 
-# Check Apache status
+# Plan changes
+terraform plan
+
+# SSH into web server (bastion)
+ssh -i your-key.pem ec2-user@YOUR-WEB-SERVER-PUBLIC-IP
+
+# From web server, SSH to app server
+ssh ec2-user@PRIVATE-APP-SERVER-IP
+
+# Check services on app servers
 sudo systemctl status httpd
-
-# Check MariaDB status
 sudo systemctl status mariadb
+
+# Monitor Auto Scaling Group
+aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names asg-app-servers
+
+# Check ALB target health
+aws elbv2 describe-target-health --target-group-arn YOUR-TARGET-GROUP-ARN
+
+# View CloudWatch alarms
+aws cloudwatch describe-alarms
+
+# Get ALB DNS name
+aws elbv2 describe-load-balancers --names app-lb --query 'LoadBalancers[0].DNSName'
 ```
 
 ## Contributing
