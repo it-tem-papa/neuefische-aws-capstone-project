@@ -4,7 +4,13 @@ resource "aws_launch_template" "app_template" {
   image_id      = data.aws_ami.amazon_linux_2.id
   instance_type = var.instance_type
   key_name      = var.key_name
-  user_data     = filebase64("${path.module}/scripts/userdata_app.sh")
+  user_data = base64encode(templatefile("${path.module}/scripts/userdata_app.sh", {
+    db_address  = aws_db_instance.db_wordpress.address
+    db_port     = aws_db_instance.db_wordpress.port
+    db_name     = aws_db_instance.db_wordpress.db_name
+    db_username = aws_db_instance.db_wordpress.username
+    db_password = aws_db_instance.db_wordpress.password
+  }))
 
   network_interfaces {
     security_groups             = [aws_security_group.sg_app_server.id]

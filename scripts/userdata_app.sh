@@ -1,34 +1,17 @@
 #!/bin/bash
 
 sudo yum update -y
-amazon-linux-extras enable php8.0
-# Install Apache and PHP
-yum install -y httpd php php-mysqlnd php-fpm php-json php-mbstring unzip wget
+sudo amazon-linux-extras enable php8.0
+sudo amazon-linux-extras enable mariadb10.5
+sudo yum install -y httpd php php-mysqlnd php-fpm php-json php-mbstring unzip wget
 
 # Start and enable Apache
-systemctl start httpd
-systemctl enable httpd
+sudo systemctl start httpd
+sudo systemctl enable httpd
 
-# Install MariaDB server
-yum install -y mariadb-server
-systemctl start mariadb
-systemctl enable mariadb
+sudo yum install -y mysql
 
-
-# TODO testen ob db über http://<EC2-PUBLIC-IP>/phpmyadmin erreichen kann
-# cd /var/www/html
-# wget https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.tar.gz
-# tar -xvzf phpMyAdmin-latest-all-languages.tar.gz
-# mv phpMyAdmin-*-all-languages phpmyadmin
-# rm phpMyAdmin-latest-all-languages.tar.gz
-
-# chown -R apache:apache /var/www/html/phpmyadmin
-
-# Secure MariaDB installation
-mysql -e "CREATE DATABASE wordpress;"
-mysql -e "CREATE USER 'wpuser'@'localhost' IDENTIFIED BY 'wppassword';"
-mysql -e "GRANT ALL PRIVILEGES ON wordpress.* TO 'wpuser'@'localhost';"
-mysql -e "FLUSH PRIVILEGES;"
+slepp 10
 
 # Download and configure WordPress
 cd /var/www/html
@@ -38,17 +21,21 @@ cp -r wordpress/* .
 rm -rf wordpress latest.zip
 
 
-# Configure wp-config.php
-cp wp-config-sample.php wp-config.php
-sed -i "s/database_name_here/wordpress/" wp-config.php
-sed -i "s/username_here/wpuser/" wp-config.php
-sed -i "s/password_here/wppassword/" wp-config.php
+sed -i "s/database_name_here/${db_name}/" wp-config-sample.php
+sed -i "s/username_here/${db_username}/" wp-config-sample.php
+sed -i "s/password_here/${db_password}/" wp-config-sample.php
+sed -i "s/localhost/${db_address}/" wp-config-sample.php
 
-
-# Set permissions
+mv wp-config-sample.php wp-config.php
 chown -R apache:apache /var/www/html
 chmod -R 755 /var/www/html
 
-# Restart Apache
-systemctl restart httpd
+# Create DB user on RDS
+mysql -h ${db_address} -P ${db_port} -u ${db_username} -p${db_password} <<SQL
+CREATE USER IF NOT EXISTS 'wpuser'@'%' IDENTIFIED BY '${db_password}';
+GRANT ALL PRIVILEGES ON ${db_name}.* TO 'wpuser'@'%';
+FLUSH PRIVILEGES;
+SQL
 
+# Restart Apache
+sudo systemctl restart httpd

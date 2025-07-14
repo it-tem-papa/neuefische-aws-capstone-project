@@ -9,6 +9,7 @@ This project creates a secure, highly available WordPress hosting environment on
 - **Custom VPC** with public and private subnets across multiple AZs
 - **Web Server** (EC2) in public subnet for management access
 - **Application Servers** (Auto Scaling Group) in private subnets running WordPress
+- **RDS MySQL Database** shared across all app servers
 - **Application Load Balancer** with health checks distributing traffic across app servers
 - **Auto Scaling Policies** with CPU-based scaling triggers
 - **CloudWatch Monitoring** with automatic scaling alarms
@@ -156,6 +157,8 @@ SECURITY GROUPS:
    private_subnet_cidrs   = ["10.0.0.32/28", "10.0.0.48/28"]
    availability_zones     = ["us-west-2a", "us-west-2b"]
    my_ip                  = "YOUR.IP.ADDRESS/32"
+   DB_USERNAME            = "root"
+   DB_PASSWORD            = "your-secure-password"
    aws_access             = "your-access-key"
    aws_secret             = "your-secret-key"
    aws_token              = "your-session-token"  # If using temporary credentials
@@ -194,9 +197,15 @@ The web server user data script:
 - Creates a simple status page
 
 ### Database Configuration
-- **Database**: wordpress
-- **User**: wpuser
-- **Password**: wppassword (change in production!)
+- **Database Type**: AWS RDS MySQL 8.0.35
+- **Instance Class**: db.t3.micro
+- **Database Name**: wordpress
+- **Master User**: Configured via `DB_USERNAME` variable
+- **Master Password**: Configured via `DB_PASSWORD` variable
+- **WordPress User**: wpuser (created automatically)
+- **Multi-AZ**: Disabled (single AZ for cost optimization)
+- **Storage**: 10GB GP2
+- **Backup**: Skip final snapshot enabled
 
 ### Auto Scaling Configuration
 
@@ -244,16 +253,18 @@ The web server user data script:
 ├── provider.tf                # AWS provider configuration
 ├── variables.tf               # Variable definitions
 ├── vpc.tf                     # VPC configuration
+├── subnet.tf                  # Subnet configurations
 ├── routetable.tf              # Route tables and associations
 ├── nat.tf                     # NAT Gateway and Elastic IP
-├── sg.tf                      # Security groups (web server, ALB, app servers)
+├── sg.tf                      # Security groups (web server, ALB, app servers, RDS)
 ├── ec2.tf                     # Web server EC2 instance with AMI data source
 ├── alb.tf                     # Application Load Balancer and target group
 ├── autoscaling.tf             # Launch template, ASG, scaling policies, CloudWatch alarms
+├── db.tf                      # RDS MySQL database and subnet group
 ├── terraform.tfvars           # Variable values (keep secure!)
 ├── scripts/
 │   ├── userdata_web.sh        # Web server initialization script
-│   ├── userdata_app.sh        # App server initialization script
+│   ├── userdata_app.sh        # App server initialization script with RDS integration
 │   └── loadbalancertest.sh    # Load balancer testing script
 ├── forme.md                   # Detailed architecture explanation
 └── README.md                  # This file
@@ -276,6 +287,50 @@ The web server user data script:
 - Use AWS Systems Manager Session Manager instead of SSH
 - Implement AWS WAF for web application protection
 - Add CloudWatch monitoring and logging
+
+## Database Management
+
+### Connecting to RDS Database
+
+**Method 1: Via App Server (Recommended)**
+```bash
+# SSH to web server (bastion)
+ssh -i your-key.pem ec2-user@WEB-SERVER-PUBLIC-IP
+
+# SSH to app server
+ssh ec2-user@APP-SERVER-PRIVATE-IP
+
+# Connect to RDS
+mysql -h RDS-ENDPOINT -u root -p
+```
+
+**Method 2: Direct Connection (if RDS is publicly accessible)**
+```bash
+# Get RDS endpoint
+terraform output rds_endpoint
+
+# Connect directly
+mysql -h YOUR-RDS-ENDPOINT -u root -p
+```
+
+### Database Operations
+
+**Create Backup:**
+```bash
+mysqldump -h RDS-ENDPOINT -u root -p wordpress > wordpress_backup.sql
+```
+
+**Restore Backup:**
+```bash
+mysql -h RDS-ENDPOINT -u root -p wordpress < wordpress_backup.sql
+```
+
+**View WordPress Tables:**
+```sql
+USE wordpress;
+SHOW TABLES;
+SELECT * FROM wp_users;
+```
 
 ### Infrastructure Organization
 The project uses a **modular file structure** for better maintainability:
@@ -308,7 +363,11 @@ terraform destroy
 5. **Health Check Failures**: Verify WordPress is responding on port 80
 6. **Instances Not Joining ALB**: Check target group registration and health status
 7. **ALB Health Check Failures**: Verify ALB security group allows outbound HTTP to app servers
-8. **Security Group Rule Deletion Error**: If you get GroupId missing errors during destroy:
+8. **Database Connection Error**: 
+   - Check RDS security group allows connections from app servers
+   - Verify RDS endpoint is accessible from private subnets
+   - Check database credentials in terraform.tfvars
+9. **Security Group Rule Deletion Error**: If you get GroupId missing errors during destroy:
    ```bash
    # Remove orphaned security group rules from state
    terraform state list | grep aws_vpc_security_group_.*_rule
@@ -321,6 +380,9 @@ terraform destroy
 ```bash
 # Check Terraform state
 terraform show
+
+# Get RDS connection details
+terraform output
 
 # Validate configuration
 terraform validate
@@ -336,7 +398,12 @@ ssh ec2-user@PRIVATE-APP-SERVER-IP
 
 # Check services on app servers
 sudo systemctl status httpd
-sudo systemctl status mariadb
+
+# Connect to RDS from app server
+mysql -h RDS-ENDPOINT -u root -p
+
+# Create database backup
+mysqldump -h RDS-ENDPOINT -u root -p wordpress > backup.sql
 
 # Monitor Auto Scaling Group
 aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names asg-app-servers
@@ -348,7 +415,7 @@ aws elbv2 describe-target-health --target-group-arn YOUR-TARGET-GROUP-ARN
 aws cloudwatch describe-alarms
 
 # Get ALB DNS name
-aws elbv2 describe-load-balancers --names app-lb --query 'LoadBalancers[0].DNSName'
+aws elbv2 describe-load-balancer --names app-lb --query 'LoadBalancers[0].DNSName'
 ```
 
 ## Contributing

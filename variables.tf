@@ -72,9 +72,14 @@ variable "anywhere_ipv4" {
 
 }
 
-variable "user_name" {
-  description = "The username for SSH access to the EC2 instance"
+variable "DB_USERNAME" {
+  description = "The username for the database"
   type        = string
-  default     = ""
+  default     = "wordpress_user"
+}
 
+variable "DB_PASSWORD" {
+  description = "The password for the database"
+  type        = string
+  default     = "password3141!"
 }
