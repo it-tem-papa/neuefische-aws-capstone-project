@@ -83,3 +83,10 @@ variable "DB_PASSWORD" {
   type        = string
   default     = "password3141!"
 }
+
+variable "DB_NAME" {
+  description = "The name of the database"
+  type        = string
+  default     = "wordpress"
+
+}

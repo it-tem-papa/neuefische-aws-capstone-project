@@ -5,7 +5,7 @@ resource "aws_db_instance" "db_wordpress" {
   instance_class         = "db.t3.micro"
   allocated_storage      = 10
   storage_type           = "gp2"
-  db_name                = "wordpress"
+  db_name                = var.DB_NAME
   username               = var.DB_USERNAME
   password               = var.DB_PASSWORD
   multi_az               = false
