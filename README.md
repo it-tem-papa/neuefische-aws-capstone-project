@@ -65,6 +65,13 @@ This project creates a secure, highly available WordPress hosting environment on
 │  │ │  │  (WordPress)    │    │ │    │ │  │        (WordPress)              │ │    │ │
 │  │ │  │                 │    │ │    │ │  │                                 │ │    │ │
 │  │ │  └─────────────────┘    │ │    │ │  └─────────────────────────────────┘ │    │ │
+|  | |  ┌────────────────────┐ │ │    │ │                                      │    │ │
+│  │ │  │      RDS DB        │ │ |    | |                                      │    │ │
+│  │ │  │   (MySQL 8.0)      │ │ |    | |                                      │    │ │
+│  │ │  └────────────────────┘ | |    | |                                      │    │ │ 
+|  │ │  (Accessible only from  | |    | |                                      │    │ │
+|  │ │       app servers)      | |    | |                                      │    │ │
+|  | |                         | |    | |                                      │    │ │
 │  │ │           │             │ │    │ │                │                     │    │ │
 │  │ │           │             │ │    │ │                │                     │    │ │
 │  │ └───────────┼─────────────┘ │    │ └────────────────┼─────────────────────┘    │ │
@@ -82,14 +89,16 @@ This project creates a secure, highly available WordPress hosting environment on
 TRAFFIC FLOW:
 ─────────────
 User Request:  Internet → ALB → App Servers (Private Subnets)
-Management:    SSH → Web Server → App Servers (if needed)
+Management:    SSH → Web Server → App Servers → RDS
+Database:      App Servers → RDS (MySQL, private access only)
 Updates:       App Servers → NAT Gateway → Internet
 
 SECURITY GROUPS:
 ────────────────
 • Web Server SG:    SSH (Your IP), HTTP (0.0.0.0/0)
 • ALB SG:           HTTP (0.0.0.0/0)
-• App Server SG:    HTTP (ALB only), SSH (Web Server only)
+• App Server SG:    HTTP (ALB only), SSH (Web Server only), MySQL (to RDS only)
+• RDS SG:           MySQL (port 3306) from App Server SG only
 ```
 
 ## Infrastructure Components
@@ -185,10 +194,13 @@ SECURITY GROUPS:
 ### WordPress Setup
 The app server user data script automatically:
 - Updates the system packages
-- Installs Apache, PHP 8.0, and MariaDB
-- Downloads and configures WordPress
-- Creates a WordPress database and user
-- Sets proper file permissions
+- Installs Apache, PHP 8.0, and MariaDB client
+- Clones a GitHub repository that contains pre-packed WordPress files (`wordpress-files.tar.gz`) and optionally a SQL dump (`wordpress.sql`)
+- Extracts and copies the WordPress files into `/var/www/html`
+- Sets proper file permissions for Apache
+- Creates the database user (`wpuser`) and grants privileges
+- If `wordpress.sql` is present, imports the dump and performs automatic URL updates from `localhost` to the live ALB DNS
+- Automatically configures `wp-config.php` with RDS credentials
 
 ### Web Server Setup
 The web server user data script:
